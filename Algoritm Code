@@ -1,0 +1,97 @@
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
+cols = ['user_id', 'movie_id', 'rating', 'timestamp']
+dataset=pd.read_csv('u.data',sep='\t', names=cols)
+X=dataset.iloc[:, :2].values
+y=dataset['rating'].values
+
+from sklearn.preprocessing import LabelEncoder
+le1=LabelEncoder()
+le2=LabelEncoder()
+X[:,0]=le1.fit_transform(X[:,0])
+X[:,1]=le2.fit_transform(X[:,1])
+X = X.astype(np.int32)
+y = y.astype(np.float32)
+X_train,X_test,y_train,y_test=train_test_split(X,y,test_size=0.2,random_state=42)
+
+um_users=len(le1.classes_)
+num_movies = len(le2.classes_)
+
+
+user_input = keras.Input(shape=(1,))
+movie_input = keras.Input(shape=(1,))
+
+user_embedding = layers.Embedding(input_dim=num_users, output_dim=50)(user_input)
+movie_embedding = layers.Embedding(input_dim=num_movies, output_dim=50)(movie_input)
+
+
+user_vec = layers.Flatten()(user_embedding)
+movie_vec = layers.Flatten()(movie_embedding)
+concat = layers.Concatenate()([user_vec, movie_vec])
+
+
+x = layers.Dense(128, activation='relu')(concat)
+x = layers.Dense(64, activation='relu')(x)
+output = layers.Dense(1)(x) 
+
+model = keras.Model([user_input, movie_input], output)
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+model.summary()
+
+history=model.fit([X_train[:, 0], X_train[:, 1]], y_train,
+          validation_data=([X_test[:, 0], X_test[:, 1]], y_test),
+          epochs=50, batch_size=64)
+
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Validation Loss (MSE)', marker='o')
+plt.plot(history.history['val_loss'], label='Test Loss (MSE)', marker='o')
+plt.title('Validation and Test Losses (MSE)')
+plt.xlabel('Epoch')
+plt.ylabel('Loss (MSE)')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['mae'], label='Validation MAE', marker='o')
+plt.plot(history.history['val_mae'], label='Test MAE', marker='o')
+plt.title('Validation and Test MAE')
+plt.xlabel('Epoch')
+plt.ylabel('MAE')
+plt.legend()
+plt.grid(True)
+
+plt.show()
+
+movie_titles = pd.read_csv('u.item',sep='|', encoding='latin-1', header=None, usecols=[0, 1],names=['movie_id', 'title'])
+
+def recommend_movies(user_raw_id, model, movie_titles, top_n=10):
+    user_encoded = le1.transform([user_raw_id])[0]
+    all_movie_ids = np.arange(num_movies)
+    
+   
+    predictions = model.predict([np.full(num_movies, user_encoded), all_movie_ids], verbose=0).flatten()
+ 
+    user_rated_movies = dataset[dataset['user_id'] == user_raw_id]['movie_id'].values
+    user_rated_movies_encoded = le2.transform(user_rated_movies)
+    predictions[user_rated_movies_encoded] = -1  
+    
+   
+    top_movie_indices = predictions.argsort()[-top_n:][::-1]
+    recommended_movie_ids = le2.inverse_transform(top_movie_indices)
+    
+    recommended_titles = movie_titles[movie_titles['movie_id'].isin(recommended_movie_ids)]
+    return recommended_titles
+
+
+user_raw_id = 7
+print(f"Movie recommendations for user {user_raw_id}:")
+recommendations = recommend_movies(user_raw_id, model, movie_titles, top_n=10)
+print(recommendations)
